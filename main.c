@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "wm8960.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -28,69 +28,22 @@
 /* USER CODE BEGIN PTD */
 #define WM8960_ADDR (0x1A << 1)
 #define SAMPLE_RATE 48000
-#define SINE_FREQ   1000
-#define SINE_SAMPLES 48
-#define AUDIO_BUFFER_SIZE 96
-#define RECORD_SECONDS    3
-#define RECORD_SAMPLES    (SAMPLE_RATE * RECORD_SECONDS)  // *2 for stereo
-#define CHUNK_SIZE        32000
+#define RECORD_SECONDS    5
+#define RECORD_SAMPLES ((uint32_t)SAMPLE_RATE * RECORD_SECONDS)  // *2 for stereo
+#define CHUNK_SIZE 11000
 
 int16_t record_buffer[RECORD_SAMPLES];  // 288000 samples = 576KB — see note below
 
-int16_t audio_buffer[AUDIO_BUFFER_SIZE];
+//int16_t audio_buffer[AUDIO_BUFFER_SIZE];
 
 
 
 
 
 
-void scan_once(I2C_HandleTypeDef *hi2c)
-{
-    HAL_StatusTypeDef result;
 
-    printf("Single scan...\r\n");
 
-    for (uint8_t addr = 1; addr < 127; addr++)
-    {
-        result = HAL_I2C_IsDeviceReady(hi2c, (addr << 1), 2, 50);
 
-        if (result == HAL_OK)
-        {
-            printf("FOUND at 0x%02X\r\n", addr);
-            return;
-        }
-    }
-
-    printf("Nothing found\r\n");
-}
-
- // 1 cycle simplified
-
-int16_t sine_table[SINE_SAMPLES] = {
-     0,  4276,  8480, 12539, 16383, 19947, 23169, 25995,
- 28377, 30272, 31650, 32487, 32767, 32487, 31650, 30272,
- 28377, 25995, 23169, 19947, 16383, 12539,  8480,  4276,
-     0, -4276, -8480,-12539,-16383,-19947,-23169,-25995,
--28377,-30272,-31650,-32487,-32767,-32487,-31650,-30272,
--28377,-25995,-23169,-19947,-16383,-12539, -8480, -4276
-};
-
-void fill_audio_buffer(void)
-{
-    static int index = 0;
-
-    for (int i = 0; i < AUDIO_BUFFER_SIZE; i += 2)
-    {
-        int16_t sample = sine_table[index];
-
-        audio_buffer[i] = sample;     // Left
-        audio_buffer[i+1] = sample;   // Right
-
-        index++;
-        if (index >= SINE_SAMPLES)
-            index = 0;
-    }
-}
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -113,8 +66,78 @@ I2S_HandleTypeDef hi2s1;
 DMA_HandleTypeDef hdma_spi1_rx;
 DMA_HandleTypeDef hdma_spi1_tx;
 
-/* USER CODE BEGIN PV */
 
+/* USER CODE BEGIN PV */
+WM8960_Handle_t wm8960;
+
+void scan_once(I2C_HandleTypeDef *hi2c)
+{
+    HAL_StatusTypeDef result;
+
+    printf("Single scan...\r\n");
+
+    for (uint8_t addr = 1; addr < 127; addr++)
+    {
+        result = HAL_I2C_IsDeviceReady(hi2c, (addr << 1), 2, 50);
+
+        if (result == HAL_OK)
+        {
+            printf("FOUND at 0x%02X\r\n", addr);
+            return;
+        }
+    }
+
+    printf("Nothing found\r\n");
+}
+
+int16_t silence_buffer[CHUNK_SIZE] = {0};
+
+void Record_audio_buffer(void)
+{
+    printf("Record start\r\n");
+
+    for (uint32_t i = 0; i < RECORD_SAMPLES; i += CHUNK_SIZE)
+    {
+        uint16_t chunk = ((RECORD_SAMPLES - i) > CHUNK_SIZE)
+                          ? CHUNK_SIZE
+                          : (uint16_t)(RECORD_SAMPLES - i);
+
+        HAL_StatusTypeDef ret = HAL_I2S_Transmit(&hi2s1,
+                                                  (uint16_t*)silence_buffer,
+                                                  chunk,
+                                                  2000);
+
+        printf("TX: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
+
+        ret = HAL_I2S_Receive(&hi2s1,
+                              (uint16_t*)record_buffer + i,
+                              chunk,
+                              2000);
+
+        printf("RX chunk %lu: %s\r\n", i / CHUNK_SIZE, ret == HAL_OK ? "OK" : "TIMEOUT");
+
+        BSP_LED_Toggle(LED_RED);
+    }
+
+    //printf("Record done\r\n");
+}
+
+void Play_audio_buffer(void)
+{
+    for (uint32_t i = 0; i < RECORD_SAMPLES; i += CHUNK_SIZE)
+    {
+        uint16_t chunk = ((RECORD_SAMPLES - i) > CHUNK_SIZE)
+                          ? CHUNK_SIZE
+                          : (uint16_t)(RECORD_SAMPLES - i);
+
+        HAL_I2S_Transmit(&hi2s1,
+                         (uint16_t*)record_buffer + i,
+                         chunk,
+                         2000);
+
+        //BSP_LED_Toggle(LED_GREEN);
+    }
+}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -131,124 +154,6 @@ static void MX_I2C1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-HAL_StatusTypeDef WM8960_Write(uint8_t reg, uint16_t value)
-{
-    uint8_t data[2];
-
-    data[0] = (reg << 1) | ((value >> 8) & 0x01);
-    data[1] = value & 0xFF;
-
-    return HAL_I2C_Master_Transmit(&hi2c1, 0x1A << 1, data, 2, 100);
-}
-
-void WM8960_Init(void)
-{
-    HAL_StatusTypeDef ret;
-
-    ret = WM8960_Write(0x0F, 0x000); // Reset
-    printf("Reset: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-    HAL_Delay(10);
-
-    // Clocking: SYSCLK = MCLK directly, no PLL, no divider
-    // ADCDIV=000, DACDIV=000, SYSCLKDIV=00, CLKSEL=0
-    ret = WM8960_Write(0x04, 0x000);
-    printf("Clocking1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // Clocking2: DCLKDIV=111 (SYSCLK/16), BCLKDIV=0000
-    // WM8960 is SLAVE so BCLKDIV doesn't matter, but set safe value
-    ret = WM8960_Write(0x08, 0x1C0);
-    printf("Clocking2: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // Power 1: VMIDSEL=01, VREF=1
-	ret = WM8960_Write(0x19, 0x0FE);
-	printf("Power1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-	HAL_Delay(100); // Let VMID charge up
-
-    // Power 2: DACL, DACR, LOUT1, ROUT1
-	ret = WM8960_Write(0x1A, 0x1E0);
-	printf("Power2: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-	HAL_Delay(100); // Let VMID charge up
-
-    // Power 3: LOMIX, ROMIX
-    ret = WM8960_Write(0x2F, 0x03C);
-    printf("Power3: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // Audio format: I2S, 16-bit, SLAVE mode (MS=0)
-    ret = WM8960_Write(0x07, 0x002);
-    printf("Format: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // DAC unmute
-    ret = WM8960_Write(0x05, 0x000);
-    printf("DAC unmute: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // DAC digital volume max + update
-    ret = WM8960_Write(0x0A, 0x1FF);
-    printf("LDAC vol: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-    ret = WM8960_Write(0x0B, 0x1FF);
-    printf("RDAC vol: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // Output mixer: DAC -> output
-    ret = WM8960_Write(0x22, 0x100);
-    printf("LMIX: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-    ret = WM8960_Write(0x25, 0x100);
-    printf("RMIX: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-    // Headphone volume 0dB + update
-    ret = WM8960_Write(0x02, 0x179);
-    printf("LOUT1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-    ret = WM8960_Write(0x03, 0x179);
-    printf("ROUT1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
-
-//MIC registers set
-
-    // Left input path: LINPUT1 -> PGA non-inverting, MIC to boost
-    WM8960_Write(0x20, 0x108);
-    WM8960_Write(0x21, 0x108);   // same for right
-
-    // PGA input volume: 0dB
-    WM8960_Write(0x00, 0x13F);
-    WM8960_Write(0x01, 0x13F);
-
-    // ADC digital volume: 0dB
-    WM8960_Write(0x15, 0x1FF);
-    WM8960_Write(0x16, 0x1FF);
-
-    printf("WM8960 init done\r\n");
-}
-
-void WM8960_Enable_Speaker(void)
-{
-    // Power 2: add SPKL and SPKR bits to existing DAC+LOUT1+ROUT1
-    // DACL=1, DACR=1, LOUT1=1, ROUT1=1, SPKL=1, SPKR=1
-    WM8960_Write(0x1A, 0x1F8);
-
-    // Speaker volume: 0dB + update bit (SPKVU=1)
-    // 0x179 = SPKVU(bit8)=1, volume=0x79 (0dB)
-    WM8960_Write(0x28, 0x179);  // Left speaker volume
-    WM8960_Write(0x29, 0x179);  // Right speaker volume
-
-    // Enable Class D outputs: left + right
-    WM8960_Write(0x31, 0x0C0);  // SPK_OP_EN[1:0] = 11
-
-    printf("Speaker enabled\r\n");
-}
-
-//void Record_Audio(void)
-//{
-//    for (int i = 0; i < RECORD_SAMPLES; i=RECORD_SAMPLES)
-//    {
-//
-//
-//        HAL_I2S_Receive(&hi2s1,
-//                        (uint16_t*)record_buffer + i,
-//                        100,
-//                        2000);
-//
-//        BSP_LED_Toggle(LED_RED);
-//        HAL_Delay(100);
-//    }
-//}
 /* USER CODE END 0 */
 
 /**
@@ -312,10 +217,10 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   scan_once(&hi2c1);
-  WM8960_Init();
+  HAL_Delay(100); /* VMID charge-up */
+  WM8960_Init(&wm8960, &hi2c1);
   HAL_Delay(100);
-  WM8960_Enable_Speaker();
-  HAL_Delay(100);
+
   if (HAL_I2S_GetState(&hi2s1) == HAL_I2S_STATE_READY)
   {
       printf("I2S ready\r\n");
@@ -325,12 +230,12 @@ int main(void)
       printf("I2S NOT ready\r\n");
   }
   //Record_Audio();
+
+
+  BSP_LED_On(LED_RED);
   printf("Recording done/n");
-//
-//  HAL_I2S_Receive(&hi2s1,(uint16_t*)audio_buffer,
-//  	                                     AUDIO_BUFFER_SIZE,
-//  	                                     HAL_MAX_DELAY);
-  //int total_chunks = (RECORD_SECONDS * 1000) + 500;
+  Record_audio_buffer();
+
   while (1)
   {
 
@@ -338,35 +243,11 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-
-
-    	  HAL_I2S_Receive(&hi2s1,
-                      (uint16_t*)record_buffer,
-                      RECORD_SAMPLES,
-                      (RECORD_SECONDS * 1000) + 500);
+	  Play_audio_buffer();
 
 
 
 
-
-      //HAL_Delay(1000);
-
-	      //fill_audio_buffer();
-	      HAL_I2S_Transmit(&hi2s1,(uint16_t*)record_buffer,
-	    		  RECORD_SAMPLES,(RECORD_SECONDS * 1000) + 500);
-
-
-
-
-	  	     // BSP_LED_Toggle(LED_RED);
-
-
-
-//	  fill_audio_buffer();
-//	  HAL_I2S_Transmit(&hi2s1,
-//	                  (uint16_t*)audio_buffer,
-//	                        AUDIO_BUFFER_SIZE,
-//	                        HAL_MAX_DELAY);
 
   }
   /* USER CODE END 3 */
