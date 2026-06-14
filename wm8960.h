@@ -41,6 +41,11 @@ extern "C" {
 #define WM8960_REG_CLASSD1      0x31    // Class D Control 1
 #define WM8960_REG_LSPKVOL      0x28    // Left Speaker Volume
 #define WM8960_REG_RSPKVOL      0x29    // Right Speaker Volume
+#define WM8960_REG_ALC          0x11    // LALC Control
+#define WM8960_REG_ALC          0x12    // RALC Control
+#define WM8960_Noise_Gate       0x14    // Noise Gate 
+
+
 
 /* ============================================================================
  * VOLUME LIMITS
@@ -119,7 +124,7 @@ HAL_StatusTypeDef WM8960_ADC_Unmute(WM8960_Handle_t *dev);
 HAL_StatusTypeDef WM8960_Mic_Enable(WM8960_Handle_t *dev, WM8960_Input_t input);
 HAL_StatusTypeDef WM8960_Mic_SetBoost(WM8960_Handle_t *dev, WM8960_MicBoost_t boost);
 HAL_StatusTypeDef WM8960_Mic_SetPGAVolume(WM8960_Handle_t *dev, uint8_t volume); // 0-63
-
+HAL_StatusTypeDef WM8960_Noice_Filter(WM8960_Handle_t *dev);
 /* Headphone Output */
 HAL_StatusTypeDef WM8960_Headphone_Enable(WM8960_Handle_t *dev);
 HAL_StatusTypeDef WM8960_Headphone_SetVolume(WM8960_Handle_t *dev, uint8_t volume); // 0-127

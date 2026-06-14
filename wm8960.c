@@ -1,4 +1,4 @@
-#include "wm8960.h"
+#include "E:\STM32\DATA SHeet\WM8960 Driver\wm8960.h"
 #include <stdio.h>
 
 HAL_StatusTypeDef WM8960_WriteReg(WM8960_Handle_t *dev, uint8_t reg, uint16_t value)
@@ -87,11 +87,11 @@ HAL_StatusTypeDef WM8960_Init(WM8960_Handle_t *dev, I2C_HandleTypeDef *hi2c)
     if (ret != HAL_OK) return ret;
     HAL_Delay(10); /* VMID charge-up */
     /* ADC volume: 0dB with update bit */
-    ret = WM8960_WriteReg(dev, WM8960_REG_ADCVOLL, 0x1FF);
+    ret = WM8960_WriteReg(dev, WM8960_REG_ADCVOLL, 0x1E0);
     printf("ADC vol: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
     if (ret != HAL_OK) return ret;
     HAL_Delay(10); /* VMID charge-up */
-    ret = WM8960_WriteReg(dev, WM8960_REG_ADCVOLR, 0x1FF);
+    ret = WM8960_WriteReg(dev, WM8960_REG_ADCVOLR, 0x1E0);
     printf("ADC vol: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
     if (ret != HAL_OK) return ret;
     HAL_Delay(10); /* VMID charge-up */
@@ -126,11 +126,11 @@ HAL_StatusTypeDef WM8960_Init(WM8960_Handle_t *dev, I2C_HandleTypeDef *hi2c)
     HAL_Delay(10); /* VMID charge-up */
 
     /* Headphone volume: 0dB with update bit */
-    ret = WM8960_WriteReg(dev, WM8960_REG_LOUT1, 0x179);
+    ret = WM8960_WriteReg(dev, WM8960_REG_LOUT1, 0x17F);
     printf("LOUT1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
     if (ret != HAL_OK) return ret;
     HAL_Delay(10); /* VMID charge-up */
-    ret = WM8960_WriteReg(dev, WM8960_REG_ROUT1, 0x179);
+    ret = WM8960_WriteReg(dev, WM8960_REG_ROUT1, 0x17F);
     printf("LOUT1: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
     if (ret != HAL_OK) return ret;
     HAL_Delay(10); /* VMID charge-up */
@@ -147,12 +147,17 @@ HAL_StatusTypeDef WM8960_Init(WM8960_Handle_t *dev, I2C_HandleTypeDef *hi2c)
     ret = WM8960_WriteReg(dev, WM8960_REG_RSPKVOL, 0x179);
     printf("Speaker Vol: %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
     if (ret != HAL_OK) return ret;
-    HAL_Delay(10); /* VMID charge-up */
-    ret = WM8960_WriteReg(dev, WM8960_REG_CLASSD1, 0x0C0);
-    //printf("Enable Class D : %s\r\n", ret == HAL_OK ? "OK" : "FAIL");
+    HAL_Delay(10); 
+    
+    /* VMID charge-up */
+    //ret = WM8960_WriteReg(dev, WM8960_REG_CLASSD1, 0x0C0);
+    //printf("Enable Class D : %s\r\n", ret == HAL_OK ? "OK" : "FAIL");//  It can create the Vlotage surege so I2C might be disturbed. 
     //if (ret != HAL_OK) return ret;
     //HAL_Delay(10); /* VMID charge-up */
     
+    //reduse the nocie at max level(30db)
+    WM8960_WriteReg(dev, WM8960_Noise_Gate, 0x3F);  // Noise Gate
+    HAL_Delay(10);
     printf("WM8960 Init OK\r\n");
     return HAL_OK;
 }
@@ -266,18 +271,23 @@ HAL_StatusTypeDef WM8960_Mic_SetBoost(WM8960_Handle_t *dev, WM8960_MicBoost_t bo
     uint16_t rpath = 0x108 | (uint16_t)boost;
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LINPATH, lpath);
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_RINPATH, rpath);
+    HAL_Delay(10); /* VMID charge-up */
 }
 
 HAL_StatusTypeDef WM8960_Mic_SetPGAVolume(WM8960_Handle_t *dev, uint8_t volume)
 {
     /* volume: 0-63. IPVU (bit 8) latches both channels simultaneously */
     uint16_t val = ((uint16_t)(volume & 0x3F)) | 0x100;
+
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LINVOL, val);
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_RINVOL, val);
+    HAL_Delay(10); /* VMID charge-up */
 }
 
 /* ============================================================================
@@ -294,10 +304,13 @@ HAL_StatusTypeDef WM8960_Headphone_SetVolume(WM8960_Handle_t *dev, uint8_t volum
     /* volume: 0x30 (-73dB) to 0x7F (+6dB). 0x79 = 0dB
      * OUT1VU (bit 8) latches both channels */
     uint16_t val = ((uint16_t)(volume & 0x7F)) | 0x100;
+
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LOUT1, val);
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_ROUT1, val);
+    HAL_Delay(10); /* VMID charge-up */
 }
 
 HAL_StatusTypeDef WM8960_Headphone_Mute(WM8960_Handle_t *dev)
@@ -305,13 +318,16 @@ HAL_StatusTypeDef WM8960_Headphone_Mute(WM8960_Handle_t *dev)
     /* Set volume to minimum (below 0x30 = mute) */
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LOUT1, 0x100);  // OUT1VU=1, vol=0
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_ROUT1, 0x100);
+    HAL_Delay(10); /* VMID charge-up */
 }
 
 HAL_StatusTypeDef WM8960_Headphone_Unmute(WM8960_Handle_t *dev)
 {
     return WM8960_Headphone_SetVolume(dev, WM8960_HP_VOL_0DB);
+    HAL_Delay(10); /* VMID charge-up */
 }
 
 /* ============================================================================
@@ -322,9 +338,11 @@ HAL_StatusTypeDef WM8960_Speaker_Enable(WM8960_Handle_t *dev)
     HAL_StatusTypeDef ret;
     /* SPKL=1, SPKR=1 in Power2 */
     ret = WM8960_WriteReg(dev, WM8960_REG_POWER2, 0x1F8);
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     /* Class D enable: SPK_OP_EN[1:0] = 11 */
     return WM8960_WriteReg(dev, WM8960_REG_CLASSD1, 0x0C0);
+
 }
 
 HAL_StatusTypeDef WM8960_Speaker_SetVolume(WM8960_Handle_t *dev, uint8_t volume)
@@ -333,16 +351,21 @@ HAL_StatusTypeDef WM8960_Speaker_SetVolume(WM8960_Handle_t *dev, uint8_t volume)
     uint16_t val = ((uint16_t)(volume & 0x7F)) | 0x100;
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LSPKVOL, val);
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_RSPKVOL, val);
+
 }
 
 HAL_StatusTypeDef WM8960_Speaker_Mute(WM8960_Handle_t *dev)
 {
     HAL_StatusTypeDef ret;
     ret = WM8960_WriteReg(dev, WM8960_REG_LSPKVOL, 0x100);
+
+    HAL_Delay(10); /* VMID charge-up */
     if (ret != HAL_OK) return ret;
     return WM8960_WriteReg(dev, WM8960_REG_RSPKVOL, 0x100);
+
 }
 
 HAL_StatusTypeDef WM8960_Speaker_Unmute(WM8960_Handle_t *dev)
